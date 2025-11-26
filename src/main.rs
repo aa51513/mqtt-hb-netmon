@@ -1,5 +1,7 @@
 use clap::Parser;
 use rumqttc::{AsyncClient, Event, MqttOptions, Outgoing, Packet};
+use serde::{Deserialize, Serialize};
+use std::fs;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
@@ -10,17 +12,91 @@ use chrono::{DateTime, Local};
 #[derive(Parser, Debug)]
 #[command(author, version, about = "Multi-Broker MQTT heartbeat latency monitor")]
 struct Opt {
-    /// 多个 broker，格式: host:port
-    #[arg(short, long)]
-    broker: Vec<String>,
+    /// 配置文件路径
+    #[arg(short, long, default_value = "config.toml")]
+    config: String,
+}
 
-    /// 心跳周期（keepalive）
-    #[arg(short, long, default_value = "5s")]
-    keepalive: String,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct Config {
+    /// 全局默认配置
+    #[serde(default)]
+    default: DefaultConfig,
 
     /// 统计报告间隔
-    #[arg(short, long, default_value = "30s")]
+    #[serde(default = "default_stats_interval")]
     stats_interval: String,
+
+    /// Broker 列表
+    brokers: Vec<BrokerConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct DefaultConfig {
+    /// 默认心跳周期
+    #[serde(default = "default_keepalive")]
+    keepalive: String,
+
+    /// 默认用户名
+    #[serde(default)]
+    username: Option<String>,
+
+    /// 默认密码
+    #[serde(default)]
+    password: Option<String>,
+
+    /// 默认 Clean Session
+    #[serde(default = "default_clean_session")]
+    clean_session: bool,
+}
+
+impl Default for DefaultConfig {
+    fn default() -> Self {
+        Self {
+            keepalive: default_keepalive(),
+            username: None,
+            password: None,
+            clean_session: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct BrokerConfig {
+    /// Broker 地址，格式: host:port
+    host: String,
+
+    /// 心跳周期（可选，使用全局默认值）
+    #[serde(default)]
+    keepalive: Option<String>,
+
+    /// 用户名（可选）
+    #[serde(default)]
+    username: Option<String>,
+
+    /// 密码（可选）
+    #[serde(default)]
+    password: Option<String>,
+
+    /// Clean Session（可选）
+    #[serde(default)]
+    clean_session: Option<bool>,
+
+    /// 显示名称（可选）
+    #[serde(default)]
+    name: Option<String>,
+}
+
+fn default_keepalive() -> String {
+    "5s".to_string()
+}
+
+fn default_stats_interval() -> String {
+    "30s".to_string()
+}
+
+fn default_clean_session() -> bool {
+    true
 }
 
 #[derive(Debug, Clone)]
@@ -29,9 +105,9 @@ struct Stats {
     sum: u128,
     min: u128,
     max: u128,
-    values: Vec<u128>, // 用于计算标准差
-    disconnect_count: u64, // 断开连接次数
-    recent_disconnects: Vec<DateTime<Local>>, // 最近5次断开时间
+    values: Vec<u128>,
+    disconnect_count: u64,
+    recent_disconnects: Vec<DateTime<Local>>,
 }
 
 impl Stats {
@@ -58,8 +134,6 @@ impl Stats {
     fn add_disconnect(&mut self) {
         self.disconnect_count += 1;
         let now = Local::now();
-
-        // 保持最近5次断开时间
         self.recent_disconnects.push(now);
         if self.recent_disconnects.len() > 5 {
             self.recent_disconnects.remove(0);
@@ -87,66 +161,111 @@ impl Stats {
             .sum::<f64>() / self.count as f64;
         variance.sqrt()
     }
-
-    fn reset(&mut self) {
-        *self = Self::new();
-    }
 }
 
 #[tokio::main]
 async fn main() {
     let opt = Opt::parse();
 
-    if opt.broker.is_empty() {
-        eprintln!("需要至少一个 --broker <host:port>");
+    // 读取配置文件
+    let config = match load_config(&opt.config) {
+        Ok(cfg) => cfg,
+        Err(e) => {
+            eprintln!("❌ 无法读取配置文件 '{}': {}", opt.config, e);
+            eprintln!("\n💡 提示：请创建配置文件，参考格式：");
+            eprintln!("{}", example_config());
+            return;
+        }
+    };
+
+    if config.brokers.is_empty() {
+        eprintln!("❌ 配置文件中没有定义任何 broker");
         return;
     }
 
-    let keepalive = humantime::parse_duration(&opt.keepalive)
-        .expect("invalid keepalive duration");
-
-    let stats_interval_duration = humantime::parse_duration(&opt.stats_interval)
+    let stats_interval_duration = humantime::parse_duration(&config.stats_interval)
         .expect("invalid stats_interval duration");
 
     println!("╔═══════════════════════════════════════════════════════════════╗");
     println!("║            MQTT Heartbeat Latency Monitor                      ║");
     println!("╚═══════════════════════════════════════════════════════════════╝");
-    println!("  Heartbeat interval: {:?}", keepalive);
+    println!("  Config file: {}", opt.config);
     println!("  Statistics interval: {:?}", stats_interval_duration);
-    println!("  Brokers: {:?}", opt.broker);
+    println!("  Brokers: {}", config.brokers.len());
     println!("────────────────────────────────────────────────────────────────\n");
 
     // 存储每个 broker 的统计信息
     let stats_map: Arc<Mutex<std::collections::HashMap<String, Stats>>> =
         Arc::new(Mutex::new(std::collections::HashMap::new()));
 
-    // 为每个 broker 启动独立任务
     let mut tasks = Vec::new();
 
-    for broker in opt.broker.clone() {
-        let ka = keepalive;
+    // 为每个 broker 启动独立任务
+    for broker_config in config.brokers.clone() {
+        let default_config = config.default.clone();
         let stats_clone = stats_map.clone();
 
         tasks.push(task::spawn(async move {
-            monitor_broker(broker, ka, stats_clone).await;
+            monitor_broker(broker_config, default_config, stats_clone).await;
         }));
     }
 
     // 启动统计报告任务
     let stats_clone = stats_map.clone();
-    let brokers = opt.broker.clone();
+    let brokers = config.brokers.clone();
     tasks.push(task::spawn(async move {
         print_stats_periodically(stats_clone, brokers, stats_interval_duration).await;
     }));
 
-    // 等待所有任务运行（不会退出）
     futures::future::join_all(tasks).await;
+}
+
+/// 加载配置文件
+fn load_config(path: &str) -> Result<Config, Box<dyn std::error::Error>> {
+    let content = fs::read_to_string(path)?;
+    let config: Config = toml::from_str(&content)?;
+    Ok(config)
+}
+
+/// 示例配置
+fn example_config() -> &'static str {
+    r#"
+# 全局默认配置
+[default]
+keepalive = "5s"           # 默认心跳间隔
+# username = "default_user" # 默认用户名（可选）
+# password = "default_pass" # 默认密码（可选）
+clean_session = true       # 默认 Clean Session
+
+# 统计报告间隔
+stats_interval = "30s"
+
+# Broker 列表
+[[brokers]]
+host = "localhost:1883"
+name = "Local Broker"
+# keepalive = "10s"        # 覆盖默认值（可选）
+# username = "user1"       # 覆盖默认值（可选）
+# password = "pass1"       # 覆盖默认值（可选）
+
+[[brokers]]
+host = "broker.emqx.io:1883"
+name = "EMQX Public"
+keepalive = "15s"
+
+[[brokers]]
+host = "test.mosquitto.org:1883"
+name = "Mosquitto Test"
+username = "testuser"
+password = "testpass"
+clean_session = false
+"#
 }
 
 /// 定期打印统计信息
 async fn print_stats_periodically(
     stats_map: Arc<Mutex<std::collections::HashMap<String, Stats>>>,
-    brokers: Vec<String>,
+    brokers: Vec<BrokerConfig>,
     interval_duration: Duration,
 ) {
     let mut ticker = interval(interval_duration);
@@ -160,12 +279,15 @@ async fn print_stats_periodically(
         println!("║                    Statistics Report                           ║");
         println!("╚═══════════════════════════════════════════════════════════════╝");
 
-        for broker in &brokers {
-            if let Some(s) = stats.get(broker) {
-                if s.count > 0 || s.disconnect_count > 0 {
-                    println!("\n📊 Broker: {}", broker);
+        for broker_config in &brokers {
+            let broker_key = get_broker_key(broker_config);
+            let display_name = broker_config.name.as_ref()
+                .unwrap_or(&broker_config.host);
 
-                    // RTT 统计
+            if let Some(s) = stats.get(&broker_key) {
+                if s.count > 0 || s.disconnect_count > 0 {
+                    println!("\n📊 Broker: {} ({})", display_name, broker_config.host);
+
                     if s.count > 0 {
                         println!("   ├─ Samples: {}", s.count);
                         println!("   ├─ Min RTT: {} ms", s.min);
@@ -176,10 +298,8 @@ async fn print_stats_periodically(
                         println!("   ├─ No RTT data yet");
                     }
 
-                    // 断开连接统计
                     println!("   ├─ Disconnects: {}", s.disconnect_count);
 
-                    // 最近5次断开时间
                     if !s.recent_disconnects.is_empty() {
                         println!("   └─ Recent disconnects:");
                         for (i, dt) in s.recent_disconnects.iter().enumerate() {
@@ -194,7 +314,7 @@ async fn print_stats_periodically(
                         println!("   └─ No disconnects recorded");
                     }
                 } else {
-                    println!("\n📊 Broker: {} - No data yet", broker);
+                    println!("\n📊 Broker: {} ({}) - No data yet", display_name, broker_config.host);
                 }
             }
         }
@@ -203,30 +323,61 @@ async fn print_stats_periodically(
     }
 }
 
+/// 获取 broker 的唯一标识
+fn get_broker_key(broker_config: &BrokerConfig) -> String {
+    broker_config.host.clone()
+}
+
 /// 独立任务：监测单个 broker 的 ping 往返延迟
 async fn monitor_broker(
-    broker: String,
-    keepalive: Duration,
+    broker_config: BrokerConfig,
+    default_config: DefaultConfig,
     stats_map: Arc<Mutex<std::collections::HashMap<String, Stats>>>,
 ) {
-    let (host, port) = parse_host_port(&broker);
+    let (host, port) = parse_host_port(&broker_config.host);
+    let broker_key = get_broker_key(&broker_config);
+
+    // 获取实际配置值（优先使用 broker 自己的配置，否则使用默认配置）
+    let keepalive_str = broker_config.keepalive.as_ref()
+        .unwrap_or(&default_config.keepalive);
+    let keepalive = humantime::parse_duration(keepalive_str)
+        .expect("invalid keepalive duration");
+
+    let username = broker_config.username.as_ref()
+        .or(default_config.username.as_ref());
+    let password = broker_config.password.as_ref()
+        .or(default_config.password.as_ref());
+    let clean_session = broker_config.clean_session
+        .unwrap_or(default_config.clean_session);
 
     let client_id = format!("mqtt-hb-{}-{}", host, rand::random::<u16>());
     let mut mqtt = MqttOptions::new(client_id, host, port);
     mqtt.set_keep_alive(keepalive);
+    mqtt.set_clean_session(clean_session);
+
+    // 设置认证信息
+    if let (Some(user), Some(pass)) = (username, password) {
+        mqtt.set_credentials(user, pass);
+    }
 
     let (client, mut eventloop) = AsyncClient::new(mqtt, 10);
 
     // 初始化该 broker 的统计
     {
         let mut stats = stats_map.lock().await;
-        stats.insert(broker.clone(), Stats::new());
+        stats.insert(broker_key.clone(), Stats::new());
     }
 
     let mut last_ping_time: Option<Instant> = None;
     let mut reconnects = 0u64;
 
-    println!("🔌 [{}] Connecting...", broker);
+    let display_name = broker_config.name.as_ref()
+        .map(|n| format!("{} ({})", n, broker_config.host))
+        .unwrap_or_else(|| broker_config.host.clone());
+
+    println!("🔌 [{}] Connecting... (keepalive: {:?}, auth: {})",
+             display_name, keepalive,
+             if username.is_some() { "yes" } else { "no" });
 
     loop {
         match eventloop.poll().await {
@@ -237,17 +388,16 @@ async fn monitor_broker(
                 Event::Incoming(Packet::PingResp) => {
                     if let Some(start) = last_ping_time {
                         let rtt = start.elapsed().as_millis();
-                        println!("💓 [{}] PINGRESP RTT = {} ms", broker, rtt);
+                        println!("💓 [{}] PINGRESP RTT = {} ms", display_name, rtt);
 
-                        // 更新统计
                         let mut stats = stats_map.lock().await;
-                        if let Some(s) = stats.get_mut(&broker) {
+                        if let Some(s) = stats.get_mut(&broker_key) {
                             s.add(rtt);
                         }
                     }
                 }
                 Event::Incoming(Packet::ConnAck(_)) => {
-                    println!("✅ [{}] Connected successfully", broker);
+                    println!("✅ [{}] Connected successfully", display_name);
                 }
                 _ => {}
             },
@@ -257,12 +407,12 @@ async fn monitor_broker(
                 let disconnect_time = Local::now();
 
                 println!("❌ [{}] EventLoop error: {} → reconnecting... (#{}) at {}",
-                         broker, e, reconnects, disconnect_time.format("%Y-%m-%d %H:%M:%S%.3f"));
+                         display_name, e, reconnects,
+                         disconnect_time.format("%Y-%m-%d %H:%M:%S%.3f"));
 
-                // 记录断开连接
                 {
                     let mut stats = stats_map.lock().await;
-                    if let Some(s) = stats.get_mut(&broker) {
+                    if let Some(s) = stats.get_mut(&broker_key) {
                         s.add_disconnect();
                     }
                 }
