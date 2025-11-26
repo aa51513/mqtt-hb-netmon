@@ -1,5 +1,5 @@
 [package]
-name = "mqtt-hb-netmon"
+name = "mqtt-hb-netmon-tui-tls"
 version = "0.1.0"
 edition = "2024"
 
@@ -11,3 +11,5 @@ clap = { version = "4.5", features = ["derive"] }
 rand = "0.8"
 futures = "0.3.31"
 chrono = "0.4"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
