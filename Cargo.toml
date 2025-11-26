@@ -1,5 +1,5 @@
 [package]
-name = "mqtt-hb-netmon-tui-tls"
+name = "mqtt-hb-netmon"
 version = "0.1.0"
 edition = "2024"
 
