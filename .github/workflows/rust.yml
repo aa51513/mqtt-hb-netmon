@@ -17,8 +17,7 @@ jobs:
           target: x86_64-unknown-linux-gnu
           override: true
       - run: cargo build --all-features --release && mkdir -p mqtt-hb-netmon-linux-x86_64
-                                                  && mv target/release/mqtt-hb-netmonc ./mqtt-hb-netmon-linux-x86_64/
-                                                  && mv target/release/mqtt-hb-netmond ./mqtt-hb-netmon-linux-x86_64/
+                                                  && mv target/release/mqtt-hb-netmon ./mqtt-hb-netmon-linux-x86_64/
                                                   && tar zcf mqtt-hb-netmon-linux-x86_64.tar.gz ./mqtt-hb-netmon-linux-x86_64/*
       - name: Release
         uses: softprops/action-gh-release@v1
@@ -41,8 +40,7 @@ jobs:
           override: true
       - run: sudo apt-get -y install musl-tools && rustup target add x86_64-unknown-linux-musl && cargo build --all-features --release --target x86_64-unknown-linux-musl
                                                          && mkdir -p mqtt-hb-netmon-linux-musl-x86_64
-                                                         && mv target/x86_64-unknown-linux-musl/release/mqtt-hb-netmonc ./mqtt-hb-netmon-linux-musl-x86_64/
-                                                         && mv target/x86_64-unknown-linux-musl/release/mqtt-hb-netmond ./mqtt-hb-netmon-linux-musl-x86_64/
+                                                         && mv target/x86_64-unknown-linux-musl/release/mqtt-hb-netmon ./mqtt-hb-netmon-linux-musl-x86_64/
                                                          && tar zcf mqtt-hb-netmon-linux-musl-x86_64.tar.gz ./mqtt-hb-netmon-linux-musl-x86_64/*
       - name: Release
         uses: softprops/action-gh-release@v1
@@ -67,8 +65,7 @@ jobs:
           target: x86_64-pc-windows-msvc
           override: true
       - run: cargo build --all-features --release && mkdir -p mqtt-hb-netmon-windows-x86_64
-                                                  && mv target/release/mqtt-hb-netmonc.exe ./mqtt-hb-netmon-windows-x86_64/
-                                                  && mv target/release/mqtt-hb-netmond.exe ./mqtt-hb-netmon-windows-x86_64/
+                                                  && mv target/release/mqtt-hb-netmon.exe ./mqtt-hb-netmon-windows-x86_64/
                                                   && 7z a mqtt-hb-netmon-windows-x86_64.zip ./mqtt-hb-netmon-windows-x86_64/*
       - name: Release
         uses: softprops/action-gh-release@v1
@@ -91,8 +88,7 @@ jobs:
           override: true
       - run: rustup target add x86_64-apple-darwin && cargo build --all-features --release --target x86_64-apple-darwin
                                                    && mkdir -p mqtt-hb-netmon-darwin-x86_64
-                                                   && mv target/x86_64-apple-darwin/release/mqtt-hb-netmonc ./mqtt-hb-netmon-darwin-x86_64/
-                                                   && mv target/x86_64-apple-darwin/release/mqtt-hb-netmond ./mqtt-hb-netmon-darwin-x86_64/
+                                                   && mv target/x86_64-apple-darwin/release/mqtt-hb-netmon ./mqtt-hb-netmon-darwin-x86_64/
                                                    && zip mqtt-hb-netmon-darwin-x86_64.zip ./mqtt-hb-netmon-darwin-x86_64/*
       - name: Release
         uses: softprops/action-gh-release@v1
@@ -115,8 +111,7 @@ jobs:
           override: true
       - run: rustup target add aarch64-apple-darwin && cargo build --all-features --release --target aarch64-apple-darwin
                                                     && mkdir -p mqtt-hb-netmon-darwin-aarch64
-                                                    && mv target/aarch64-apple-darwin/release/mqtt-hb-netmonc ./mqtt-hb-netmon-darwin-aarch64/
-                                                    && mv target/aarch64-apple-darwin/release/mqtt-hb-netmond ./mqtt-hb-netmon-darwin-aarch64/
+                                                    && mv target/aarch64-apple-darwin/release/mqtt-hb-netmon ./mqtt-hb-netmon-darwin-aarch64/
                                                     && zip mqtt-hb-netmon-darwin-aarch64.zip ./mqtt-hb-netmon-darwin-aarch64/*
       - name: Release
         uses: softprops/action-gh-release@v1
@@ -140,8 +135,7 @@ jobs:
       - run: rustup target add armv7-unknown-linux-gnueabihf && cargo install cross --git https://github.com/cross-rs/cross
                                                              && cross build --all-features --release --target armv7-unknown-linux-gnueabihf
                                                              && mkdir -p mqtt-hb-netmon-linux-armv7
-                                                             && mv target/armv7-unknown-linux-gnueabihf/release/mqtt-hb-netmonc ./mqtt-hb-netmon-linux-armv7/
-                                                             && mv target/armv7-unknown-linux-gnueabihf/release/mqtt-hb-netmond ./mqtt-hb-netmon-linux-armv7/
+                                                             && mv target/armv7-unknown-linux-gnueabihf/release/mqtt-hb-netmon ./mqtt-hb-netmon-linux-armv7/
                                                              && tar zcf mqtt-hb-netmon-linux-armv7.tar.gz ./mqtt-hb-netmon-linux-armv7/*
       - name: Release
         uses: softprops/action-gh-release@v1
@@ -165,8 +159,7 @@ jobs:
       - run: rustup target add aarch64-unknown-linux-gnu && cargo install cross --git https://github.com/cross-rs/cross
                                                          && cross build --all-features --release --target aarch64-unknown-linux-gnu
                                                          && mkdir -p mqtt-hb-netmon-linux-aarch64
-                                                         && mv target/aarch64-unknown-linux-gnu/release/mqtt-hb-netmonc ./mqtt-hb-netmon-linux-aarch64/
-                                                         && mv target/aarch64-unknown-linux-gnu/release/mqtt-hb-netmond ./mqtt-hb-netmon-linux-aarch64/
+                                                         && mv target/aarch64-unknown-linux-gnu/release/mqtt-hb-netmon ./mqtt-hb-netmon-linux-aarch64/
                                                          && tar zcf mqtt-hb-netmon-linux-aarch64.tar.gz ./mqtt-hb-netmon-linux-aarch64/*
       - name: Release
         uses: softprops/action-gh-release@v1
@@ -191,8 +184,7 @@ jobs:
       - run: cargo install cross --git https://github.com/cross-rs/cross
       - run: cross build --all-features --release --target aarch64-unknown-linux-musl
       - run: mkdir -p mqtt-hb-netmon-linux-musl-aarch64
-      - run: mv target/aarch64-unknown-linux-musl/release/mqtt-hb-netmonc ./mqtt-hb-netmon-linux-musl-aarch64/
-      - run: mv target/aarch64-unknown-linux-musl/release/mqtt-hb-netmond ./mqtt-hb-netmon-linux-musl-aarch64/
+      - run: mv target/aarch64-unknown-linux-musl/release/mqtt-hb-netmon ./mqtt-hb-netmon-linux-musl-aarch64/
       - run: tar zcf mqtt-hb-netmon-linux-musl-aarch64.tar.gz ./mqtt-hb-netmon-linux-musl-aarch64/*
       - name: Release
         uses: softprops/action-gh-release@v1
